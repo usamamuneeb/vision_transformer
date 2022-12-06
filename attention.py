@@ -25,7 +25,7 @@ from flax.linen.linear import PrecisionLike
 from flax.linen.module import compact
 from flax.linen.module import merge_param
 from flax.linen.module import Module
-
+import pdb
 import jax
 from jax import lax
 from jax import random
@@ -183,8 +183,17 @@ def dot_product_attention(query: Array,
       deterministic, dtype, precision)
 
   # return weighted sum over values for each query position
-  return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
+  convex_comb = jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
                     precision=precision)
+  """
+  This is a great spot for debugging.
+
+  Enable the `pdb.set_trace()` below and on the debugging console, enter
+
+  `[query.shape, attn_weights.shape, convex_comb.shape]`
+  """
+  # pdb.set_trace()
+  return convex_comb
 
 
 class MultiHeadDotProductAttention(Module):
@@ -272,9 +281,85 @@ class MultiHeadDotProductAttention(Module):
                               precision=self.precision)
     # project inputs_q to multi-headed q/k/v
     # dimensions are then [batch..., length, n_heads, n_features_per_head]
+    """
+    Original was
+
     query, key, value = (dense(name='query')(inputs_q),
                          dense(name='key')(inputs_kv),
                          dense(name='value')(inputs_kv))
+    """
+    query, key, value = (jnp.expand_dims(inputs_q, -2),
+                         jnp.expand_dims(inputs_kv, -2),
+                         jnp.expand_dims(inputs_kv, -2))
+
+    # # TODO: Uncomment if using Option B (read details below)
+    # query, key, value = (query.reshape(query.shape[:2] + (self.num_heads, head_dim)),
+    #                      key.reshape(key.shape[:2] + (self.num_heads, head_dim)),
+    #                      value.reshape(value.shape[:2] + (self.num_heads, head_dim)))
+
+    """
+    The dense layers take as input
+
+    1-dimensional features of size `self.num_heads * head_dim`
+
+    and output
+
+    2-dimensions features of size `(self.num_heads, head_dim)`
+
+    (because we want to separate features into multiple heads)
+
+
+
+    Below summarizes how things would look like on the debugging console
+    if we uncomment the `pdb.set_trace()` checkpoint in this file.
+
+    With the original configuration (i.e. with `dense` layers), we get
+
+    (Pdb) [query.shape, attn_weights.shape, convex_comb.shape]
+    [(1, 145, 6, 64), (1, 6, 145, 145), (1, 145, 6, 64)]
+
+
+    We have two options to remove the `dense` layer:
+
+      (OPTION A) Replace `dense` layer with `expand_dims`
+      and later reshape `convex_comb` back into `(1, 145, 6, 64)`
+
+      This would give us
+
+      (Pdb) [query.shape, attn_weights.shape, convex_comb.shape]
+      [(1, 145, 1, 384), (1, 1, 145, 145), (1, 145, 1, 384)]
+
+      Instead of reshaping `convex_comb` back to `(1, 145, 6, 64)`
+      
+      we can also simplify the model to be essentially of just one
+      head, but this would require modifying all the pre-trained
+      parameter matrices so they adapt to the changes in the model.
+
+
+      (OPTION B) Replace `dense` layer with `reshape` directly
+
+      from    `self.num_heads * head_dim`
+      to      `(self.num_heads, head_dim)`
+    
+      With this option, the shapes we would see on the debugging
+      console would not differ at all from the input.
+
+      (Pdb) [query.shape, attn_weights.shape, convex_comb.shape]
+      [(1, 145, 6, 64), (1, 6, 145, 145), (1, 145, 6, 64)]
+
+      This however is arbitrarily splitting a dot product of
+      two 384-dim vector into 6 dot products of 64-dim vectors.
+      Since we do not know what is the right way to create these
+      6 sets of 64-dim vectors, OPTION A may be better.
+
+      In other words, there should only be one head which should
+      get all the `6 * 64 = 384` points for computing the Attention.
+
+      In the original, there was cross-talk between the heads due
+      to the dense layer, so this was not an issue.
+
+      OPTION A vs B to be determined experimentally.
+    """
 
     # During fast autoregressive decoding, we feed one position at a time,
     # and cache the keys and values step by step.
@@ -334,6 +419,10 @@ class MultiHeadDotProductAttention(Module):
         deterministic=m_deterministic,
         dtype=self.dtype,
         precision=self.precision)  # pytype: disable=wrong-keyword-args
+
+    # TODO: Uncomment if using Option A (read details above)
+    x = x.reshape(x.shape[:2] + (self.num_heads, head_dim))
+
     # back to the original inputs dimensions
     out = DenseGeneral(features=features,
                        axis=(-2, -1),

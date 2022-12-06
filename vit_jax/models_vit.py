@@ -131,6 +131,17 @@ class Encoder1DBlock(nn.Module):
     # Attention block.
     assert inputs.ndim == 3, f'Expected (batch, seq, hidden) got {inputs.shape}'
     x = nn.LayerNorm(dtype=self.dtype)(inputs)
+    """
+    The Attention used below is self Attention.
+
+    We can replace `nn.MultiHeadDotProductAttention`
+    with `x = nn.SelfAttention`.
+
+    However, please set `name='MultiHeadDotProductAttention_0'`
+    so it can read parameters from the provided checkpoints.
+
+    Additionally, `(x, x)` shold be replaced with just `(x)`
+    """
     x = nn.MultiHeadDotProductAttention(
         dtype=self.dtype,
         kernel_init=nn.initializers.xavier_uniform(),
