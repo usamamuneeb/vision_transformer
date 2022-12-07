@@ -70,7 +70,7 @@ def make_update_fn(*, apply_fn, accum_steps, tx):
   return jax.pmap(update_fn, axis_name='batch', donate_argnums=(0,))
 
 
-def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
+def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str, fromscratch: bool):
   """Runs training interleaved with evaluation."""
 
   # Setup input pipeline
@@ -119,16 +119,19 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
     # ViT / Mixer papers
     filename = config.model.model_name
 
-  pretrained_path = os.path.join(config.pretrained_dir, f'{filename}.npz')
-  if not tf.io.gfile.exists(pretrained_path):
-    raise ValueError(
-        f'Could not find "{pretrained_path}" - you can download models from '
-        '"gs://vit_models/imagenet21k" or directly set '
-        '--config.pretrained_dir="gs://vit_models/imagenet21k".')
-  params = checkpoint.load_pretrained(
-      pretrained_path=pretrained_path,
-      init_params=variables['params'],
-      model_config=config.model)
+  if fromscratch:
+    params = variables['params']
+  else:
+    pretrained_path = os.path.join(config.pretrained_dir, f'{filename}.npz')
+    if not tf.io.gfile.exists(pretrained_path):
+      raise ValueError(
+          f'Could not find "{pretrained_path}" - you can download models from '
+          '"gs://vit_models/imagenet21k" or directly set '
+          '--config.pretrained_dir="gs://vit_models/imagenet21k".')
+    params = checkpoint.load_pretrained(
+        pretrained_path=pretrained_path,
+        init_params=variables['params'],
+        model_config=config.model)
 
   total_steps = config.total_steps
 
