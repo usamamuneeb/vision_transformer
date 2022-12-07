@@ -173,8 +173,8 @@ def dot_product_attention(query: Array,
   assert key.ndim == query.ndim == value.ndim, 'q, k, v must have same rank.'
   assert query.shape[:-3] == key.shape[:-3] == value.shape[:-3], (
       'q, k, v batch dims must match.')
-  assert query.shape[-2] == key.shape[-2] == value.shape[-2], (
-      'q, k, v num_heads must match.')
+  # assert query.shape[-2] == key.shape[-2] == value.shape[-2], (
+  #     'q, k, v num_heads must match.')
   assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
 
   # compute attention weights
@@ -288,9 +288,9 @@ class MultiHeadDotProductAttention(Module):
                          dense(name='key')(inputs_kv),
                          dense(name='value')(inputs_kv))
     """
-    query, key, value = (jnp.expand_dims(inputs_q, -2),
-                         jnp.expand_dims(inputs_kv, -2),
+    query, key = (jnp.expand_dims(inputs_q, -2),
                          jnp.expand_dims(inputs_kv, -2))
+    value = dense(name='value')(inputs_kv)
 
     # # TODO: Uncomment if using Option B (read details below)
     # query, key, value = (query.reshape(query.shape[:2] + (self.num_heads, head_dim)),
